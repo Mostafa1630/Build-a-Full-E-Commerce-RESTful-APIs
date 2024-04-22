@@ -5,6 +5,7 @@ const factory = require("./handlersFactory");
 const Order = require("../models/orderModel");
 const Cart = require("../models/cartModel");
 const Product = require("../models/productModel");
+const User = require("../models/userModel");
 
 exports.createCashOrder = asyncHandler(async (req, res, next) => {
   // 1- Get cartItems depned on cartId
@@ -141,4 +142,59 @@ exports.checkSession = asyncHandler(async (req, res, next) => {
 
   // send session to response
   res.status(200).json({ status: "success", session });
+});
+
+// create order by data in session
+
+const createCardOrder = async (session) => {
+  const cartId = session.client_reference_id;
+  const shippingAdress = session.metadata;
+  const orderPrice = session.amount_total / 100;
+
+  const cart = await Cart.findById(cartId);
+  const user = User.findOne({ email: session.customer_email });
+
+  // create order
+  // 3- Create order with paymentMethodType default = cash
+  const order = await Order.create({
+    user: user._id,
+    cartItems: cart.cartItems,
+    shippingAdress,
+    totalOrderPrice: orderPrice,
+    isPaid: true,
+    paidAt: Date.now(),
+    paymentMethodType: card,
+  });
+
+  // 4- update in product decrement quantity and increment sold
+  if (order) {
+    const bulkOptions = cart.cartItems.map((item) => ({
+      updateOne: {
+        filter: { _id: item.product },
+        update: { $inc: { quantity: -item.quantity, sold: +item.quantity } },
+      },
+    }));
+    await Product.bulkWrite(bulkOptions, {});
+  }
+
+  // 5- clear cartItems
+  await Cart.findByIdAndDelete(cartId);
+};
+
+exports.webHookCheckout = asyncHandler(async (req, res, next) => {
+  const sig = req.headers["stripe-signature"];
+
+  let event;
+
+  try {
+    event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
+  } catch (err) {
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+  if (event.type === "checkout.session.completed") {
+    // console.log(event); //content all data in session
+    createCardOrder(event.data.object);
+  }
+
+  res.status(200).json({ recevied: true });
 });

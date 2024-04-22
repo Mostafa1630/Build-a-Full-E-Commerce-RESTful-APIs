@@ -16,12 +16,19 @@ const dbConnection = require("./config/dbconnection");
 const globalError = require("./middleware/errorMidllware");
 
 const mountRoutes = require("./routes");
+const {webHookCheckout} = require('./controllers/orderServices')
 
 dbConnection();
 
 if (process.env.NODE_ENV === "devlopment") {
   app.use(morgan("dev"));
 }
+
+app.post(
+  "/webhook",
+  express.raw({ type: "application/json" }),
+  webHookCheckout
+);
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "uploads")));
